@@ -1,0 +1,411 @@
+#!/usr/bin/env python
+# this script has undergone major changes
+#sonika
+import sys
+import numpy as np
+import os
+import csv
+import classifications as clf
+
+# set the buffer (number of frames you'd like to skip on left and right side) for better results
+# should depend on the frame rate
+frame_buffer = 10
+
+# checklist (ref minor_changes)
+checklist = [
+    'Ardhachakrasana', # oneside
+    'Garudasana', 
+    'Gorakshasana', # oneside           
+    'Katichakrasana',
+    'Natarajasana',
+    'Natavarasana',
+    'Naukasana',
+    'Padahastasana', # oneside
+    'ParivrttaTrikonasana',
+    'Pranamasana',
+    'Santolanasana', # oneside
+    'Still',
+    'Tadasana', # oneside
+    'TriyakTadasana',
+    'Trikonasana',
+    'Tuladandasana',
+    # 'Tuladandsana':[20,15,50,15],
+    'Utkatasana',
+    'Virabhadrasana',
+    'Vrikshasana',    
+    ]
+# usage
+def usage():
+    sys.exit('Usage: \nInput: <base_directory> \n outputs a entry into OUTPUT.csv <SubjID> <aasanaID> <metric_name> <Metric_value>')
+if(len(sys.argv) != 2):
+    usage()
+
+# obtain a list of directories stored inside the base directory
+# the base directory is taken as an arguement
+directory = sys.argv[1]
+output_dir = os.getcwd()
+os.chdir(directory)
+list_of_subjects = next(os.walk(os.getcwd()))[1]
+
+# aasana_start_dur['someasana'] = [left start time, left duration, right start time, right duration]
+aasana_start_dur = {
+    'Ardhachakrasana':[25,60], # non bilateral
+    'Garudasana':[25,25,65,25],
+    'Gorakshasana':[25,60], # non bilateral          
+    'Katichakrasana':[25,60,100,60], 
+    'Natarajasana':[25,40,80,40],
+    'Natavarasana':[25,60,100,60],
+    'Naukasana':[15,20], # non bilateral
+    'Padahastasana':[30,90], # non bilateral
+    'ParivrttaTrikonasana':[30,30,80,30], 
+    'Pranamasana':[25,30,65,30],
+    'Santolanasana':[25,35], # non bilateral
+    'Still':[20,20], # non bilateral
+    'Tadasana':[25,55], # non bilateral
+    'TriyakTadasana':[25,35,75,35],
+    'Trikonasana':[30,30,80,30],
+    'Tuladandasana':[20,20,20,20], # needs input
+    'Utkatasana':[20,30], # non bilateral
+    'Virabhadrasana':[30,25,70,25],
+    'Vrikshasana':[25,30,65,30],    
+}
+# specifies types of joints to be used for  the script
+joint_types = ['JointType_SpineBase',
+               'JointType_SpineMid',
+               'JointType_Neck',
+               'JointType_Head',
+               'JointType_ShoulderLeft',
+               'JointType_ElbowLeft',
+               'JointType_WristLeft',
+               'JointType_HandLeft',
+               'JointType_ShoulderRight',
+               'JointType_ElbowRight',
+               'JointType_WristRight',
+               'JointType_HandRight',
+               'JointType_HipLeft',
+               'JointType_KneeLeft',
+               'JointType_AnkleLeft',
+               'JointType_FootLeft',
+               'JointType_HipRight',
+               'JointType_KneeRight',
+               'JointType_AnkleRight',
+               'JointType_FootRight',
+               'JointType_SpineShoulder',
+               'JointType_HandTipLeft',
+               'JointType_ThumbLeft',
+               'JointType_HandTipRight',
+               'JointType_ThumbRight'
+               ]
+
+# function for taking a given time in hours, minutes, seconds, 
+# and returning the corresponding frame's index in "jointwise"
+# jointwise is a list of lists
+# the first index in jointwise is the joint_type, 
+# where the number corresponds to the position of that joint in joint_types list above
+# the second index returns the corresponding row as stored in joints.csv
+# the third index is an element of the row 
+def getIndices(h,m,s,jointwise):
+    #binary search for finding index
+    timestring = 0
+    lb = 0
+    ub = len(jointwise[1])
+    mid = int((lb+ub)/2)
+    while(lb<ub):
+        timestring = jointwise[0][mid][1]
+        jh,jm,js = timestring.split(':')
+        jh,jm,js = np.float64(jh),np.float64(jm),np.float64(js)
+        compare = 3600*(jh-h)+60*(jm-m)+(js-s)
+        if(compare>0): #it means data[mid] is greater than item
+            ub = mid-1
+        elif(compare<0):
+            lb = mid+1
+        else:
+            return mid
+        mid = int((lb+ub)/2)
+    return mid
+
+# function translates a given start time and duration to 
+# keys in the jointwise array, which has been described in the comments above
+# returns a tuple of begin, end
+def getBegEnd(start,duration,jointwise):
+    sh = int(start/3600)
+    sm = int((start%3600)/60)
+    ss = (start%60)
+    dh = int(duration/3600)
+    dm = int((duration%3600)/60)
+    ds = (duration%60)
+    initial = jointwise[0][0][1]
+    Ih,Im,Is = initial.split(':')
+    Ih,Im,Is = np.float64(Ih),np.float64(Im),np.float64(Is)
+    #commencement of holding aasana
+    cs = (Is + ss)%60
+    cm = int((Is+ss)/60) + Im + sm
+    ch = Ih + sh + int(cm/60)
+    cm = cm%60
+    #end of holding aasana
+    es = cs + ds
+    em = int(es/60) + cm + dm
+    es = es%60
+    eh = int(em/60) + ch + dh
+    em = em%60
+    #get indices
+    begin = getIndices(ch,cm,cs,jointwise)
+    end = getIndices(eh,em,es,jointwise)
+    return begin,end
+        
+# function was expected to extract stability of a group of aasanas
+# the groups have been specified in classifications.py
+# the code needs degubbing as of now, and is not used in any way 
+def extract_classification_stability(subjID,aasana_list,group_name):
+	stabilities_l = []
+	stabilities_r = []
+	mean_l = 0
+	mean_r = 0
+	mean = 0
+
+	with open(output_dir + '/OUTPUT.csv','r') as csvFile:
+		csv_reader = csv.reader(csvFile)
+		for row in csv_reader:
+			if(not row):
+				continue
+			if(row[1] in aasana_list and row[0] == subjID):
+				if(row[2]=='Stability-l'):
+					stabilities_l.append(np.float64(row[3]))
+				elif(row[1]=='Stability-r'):
+					stabilities_r.append(np.float64(row[3]))
+	mean_l = np.mean(stabilities_l)
+	mean_r = np.mean(stabilities_r)
+	mean = (mean_l + mean_r)/2
+	row1 = [subjID,group_name,'Stability-l',mean_l]
+	row2 = [subjID,group_name,'Stability-r',mean_r]
+	row3 = [subjID,group_name,'Stability',mean]
+	rows = [row1,row2,row3]
+	with open('OUTPUT.csv','a') as csvFile:
+		csv_writer = csv.writer(csvFile)
+		for row in rows:
+			csv_writer.writerow(row) 
+
+
+# list_of_subects is a list of directories inside the base directory
+# base directory is obtained as an arguement from the user
+# each element inside this list is a string of the form 'Subjxyz'
+# where xyz is the subject number and Subjxyz is the subject id
+for subjectID in list_of_subjects:
+# now we extract the elements inside the directory of a specific subject
+# id of that subject is subjectID
+# generate a list of aasanas based on the names of the folders 
+# inside the directory of an individual subject
+    list_of_aasanas = next(os.walk(os.getcwd()+'/'+subjectID))[1]
+    # obtain a list of aasanas using the names of the folders in the directory
+    # generate a list of names of the folders in the directory
+    # extract the aasana name from that list
+    for i in range(len(list_of_aasanas)):
+        temp = list_of_aasanas[i].split('_')
+        aasana1 = ''
+        for j in range(1,len(temp)):
+            aasana1 = aasana1+temp[j]
+        list_of_aasanas[i] = aasana1
+
+    # generate a list of joints by accessing the files in list_of_aasanas
+    bilateral = True
+    for aasanaID in list_of_aasanas:
+# we now extract the names of directories inside the directory of one aasana of the subject
+# the ID of the subject is 'subjectID' whereas the name of the aasana is 'aasanaID'
+# if the folder does not match any aasana in our hard-coded list of aasanas, we ignore it
+# if not, we open 'joints.csv', and append the rows of 'joints.csv' inside that aasana folder
+# we append these rows to a list called 'joints'
+# every element of 'joints' is a row of joints.csv, of the subject 'subjectID' and aasana 'aasanaID'
+        if(aasanaID not in checklist): continue
+        filename = directory+'/'+subjectID+'/'+subjectID+'_'+aasanaID+'/joints.csv'
+        # filename = sys.argv[1]
+        joints = []
+        try:
+            with open(filename, 'r') as fo:
+                csv_reader = csv.reader(fo)
+                i = 0
+                for row in csv_reader:
+                    if(i%2 == 0):
+                        joints.append(row) 
+                    i = i+1
+        except:
+            print(filename+' not found')
+            continue
+
+# here, we initialize weights assigned to each joint, as of now, the weights are 1 by default
+        weights = np.zeros((len(joint_types),3),dtype = np.float64)
+        weights = weights + 1
+# we define a variable 'jointwise' where each element is a list of rows
+# each element should contain rows of the same joint
+# hence we traverse 'joints' (containing all rows of 'joints.csv') and 
+# put each row into a bucket, i.e. we append it to the appropriate element of jointwise
+        jointwise = [[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[]]
+        for row in joints:
+            for j in range(len(joint_types)):
+                if(row[2]==joint_types[j]):
+                    jointwise[j].append(row)
+    	# jointwise[j] contains data on joint joint_types[j]
+        # get begin and end using gerBegEnd() function, we get indices for jointwise
+        time_data = aasana_start_dur[aasanaID]
+        start_left = int(time_data[0])
+        dur_left = int(time_data[1])
+        begin_left,end_left = getBegEnd(start_left,dur_left,jointwise)
+# each aasana has a start and end time hardcoded into it in a list format
+# the list has 4 elements in case the aasaana is bilaterla
+# the list has 2 elements otherwise
+# we try to access the third element (index 2)
+# if that raises an exception, the aasana is not bilateral
+# if not, the aasaana is bilateral (set the bilateral variable accordingly)
+        try:
+            start_right = int(time_data[2])
+            dur_right = int(time_data[3])
+            begin_right,end_right = getBegEnd(start_right,dur_right,jointwise)
+            bilateral = True
+        except:
+            bilateral = False
+        
+        
+        # print(jointwise[0][begin][1])
+        # print(jointwise[0][end][1])
+# we now define instability, which will contain instabilities of all joints
+        instability = []
+
+# in the following loop, we proceed as follows:
+# 1. We extract the ith element of jointwise, this element contains 
+#    rows of the ith joint
+# 2. We already extracted the beginning and end frame, those are beg and end
+# 3. We traverse any_joint from beg+buffer to end-buffer
+# 4. We extract the following parameters:
+#    a. Inverse frame rate = current_frame_time - previous_frame_time 
+#       and append it to inverted_frame_rate
+#    b. x, y, z cooridnates stored inside the row, and we append it to x,y,z arrays
+# 5. We extract the means of x,y,z arrays as mx,my,mz
+# 6. We compute the normalized variance by first computing the sum of inv[i](x[i]-xm)**2
+#    where inv[i] stands for inverted_frame_rate[i]
+# 7. Finally, we normalize this sum and compute the normalized variance, and some other parameters needed
+#    We also multiply the matrix by weights
+# 8. We repeat this loop for right hand side, if bilateral == true
+
+        # create left hand side data
+        for i in range(25):
+            any_joint = jointwise[i]
+            hrs = []
+            mns = []
+            scs = []
+            x = []
+            y = []
+            z = []
+            varX = []
+            varY = []
+            varZ = []
+            inverted_frame_rate = []
+            for row in any_joint[begin_left + frame_buffer : end_left - frame_buffer]:
+                hours, minutes, seconds = row[1].split(':')
+                hours, minutes, seconds = np.float64(hours), np.float64(minutes), np.float64(seconds) 
+                hrs.append(hours)
+                mns.append(minutes)
+                scs.append(seconds)
+                x.append(np.float64(row[7]))
+                y.append(np.float64(row[8]))
+                z.append(np.float64(row[9]))
+            mx,my,mz = np.mean(x),np.mean(y),np.mean(z)
+            for i in range(1,len(x)):
+                inverted_frame_rate.append(3600*(hrs[i]-hrs[i-1])+60*(mns[i]-mns[i-1])+(scs[i]-scs[i-1]))
+                varX.append(inverted_frame_rate[i-1]*((x[i]-mx)**2))
+                varY.append(inverted_frame_rate[i-1]*((y[i]-my)**2))
+                varZ.append(inverted_frame_rate[i-1]*((z[i]-mz)**2))
+            sumlist = np.array([sum(varX),sum(varY),sum(varZ)])
+            normalizer = sum(inverted_frame_rate)
+            instability.append(sumlist/normalizer)
+
+        weighted_instability_matrix = instability*weights
+
+        inst = np.sum(weighted_instability_matrix)
+
+        # print(normalizer)
+        # print(sumlist)
+        # print joint stability-l
+        os.chdir(output_dir)
+# here, we append the result to 'OUTPUT.csv'
+        for k in range(len(instability)):
+            metric = joint_types[k] + '_Stability-l'
+            element = np.mean(instability[k])
+            row_out = [subjectID,aasanaID,metric,element]
+            with open('OUTPUT.csv','a') as csvFile:
+                csv_writer = csv.writer(csvFile)
+                csv_writer.writerow(row_out)
+
+        row1 = [subjectID,aasanaID,'Stability-l',inst]
+        
+        with open('OUTPUT.csv','a') as csvFile:
+            csv_writer = csv.writer(csvFile)
+            csv_writer.writerow(row1)
+        print(row1)
+        os.chdir(directory)
+
+        if(not bilateral):
+            continue
+
+        instability1 = []
+        for i in range(25):
+            any_joint = jointwise[i]
+            hrs = []
+            mns = []
+            scs = []
+            x = []
+            y = []
+            z = []
+            varX = []
+            varY = []
+            varZ = []
+            inverted_frame_rate = []
+            for row in any_joint[begin_right + frame_buffer : end_right - frame_buffer]:
+                hours, minutes, seconds = row[1].split(':')
+                hours, minutes, seconds = np.float64(hours), np.float64(minutes), np.float64(seconds) 
+                hrs.append(hours)
+                mns.append(minutes)
+                scs.append(seconds)
+                x.append(np.float64(row[7]))
+                y.append(np.float64(row[8]))
+                z.append(np.float64(row[9]))
+            mx,my,mz = np.mean(x),np.mean(y),np.mean(z)
+            for i in range(1,len(x)):
+                inverted_frame_rate.append(3600*(hrs[i]-hrs[i-1])+60*(mns[i]-mns[i-1])+(scs[i]-scs[i-1]))
+                varX.append(inverted_frame_rate[i-1]*((x[i]-mx)**2))
+                varY.append(inverted_frame_rate[i-1]*((y[i]-my)**2))
+                varZ.append(inverted_frame_rate[i-1]*((z[i]-mz)**2))
+            sumlist = np.array([sum(varX),sum(varY),sum(varZ)])
+            normalizer = sum(inverted_frame_rate)
+            instability1.append(sumlist/normalizer)
+
+        weighted_instability1_matrix = instability1*weights
+
+        inst1 = np.sum(weighted_instability1_matrix)
+
+        # print(normalizer)
+        # print(sumlist)
+        os.chdir(output_dir)
+# here, we append the result to 'OUTPUT.csv'
+        for k in range(len(instability1)):
+            metric = joint_types[k] + '_Stability-r'
+            element = np.mean(instability1[k])
+            row_out = [subjectID,aasanaID,metric,element]
+            with open('OUTPUT.csv','a') as csvFile:
+                csv_writer = csv.writer(csvFile)
+                csv_writer.writerow(row_out)
+
+        row1 = [subjectID,aasanaID,'Stability-r',inst1]
+        
+        with open('OUTPUT.csv','a') as csvFile:
+            csv_writer = csv.writer(csvFile)
+            csv_writer.writerow(row1)
+        print(row1)
+        os.chdir(directory)
+
+    #extract_classification_stability(subjectID,clf.Type.unilateral,'Type_unilateral')
+    #extract_classification_stability(subjectID,clf.Type.bilateral,'Type_bilateral')
+    #extract_classification_stability(subjectID,clf.Type.horizontal,'Type_horizontal')
+    #extract_classification_stability(subjectID,clf.Category.non_balancing,'Category_nonbalancing')
+    #extract_classification_stability(subjectID,clf.Category.balancing,'Category_balancing')
+
+os.chdir(output_dir)
+print('~Fin')

@@ -1,0 +1,173 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[4]:
+
+
+import csv
+import numpy as np
+import random
+import sys
+
+# In[5]:
+if(len(sys.argv)!=2):
+    sys.exit('Usage:\nInput: <number of random iterations N of bootstrapping>\nOutput: CMP_N.csv containing p values and correlations')
+N = int(sys.argv[1])
+
+
+def findCorrCoeff(array1,array2):
+    x = np.array(array1)
+    y = np.array(array2)
+    mx = np.mean(array1)
+    my = np.mean(array2)
+    temp = (x-mx)*(y-my)
+    mtemp = np.mean(temp)
+    sigx = np.std(x)
+    sigy = np.std(y)
+    corr = mtemp/(sigx*sigy)
+    #print(x,y)
+    return corr
+
+
+# In[6]:
+
+
+def bootstrap(array1,array2):
+    leng = len(array1)
+    freq = np.zeros(201, dtype = np.float64)
+    #N = int(sys.argv[1])
+    for j in range(N):
+        a1 = []
+        a2 = []
+        for i in range(leng):
+            a1.append(random.choice(array1))
+            a2.append(random.choice(array2))
+        corr = findCorrCoeff(a1,a2)
+        corr_rounded = round(corr,2)
+        try:
+            freq[100 + int(corr_rounded*100)] += 1
+        except:
+            freq[100 + int(corr_rounded*100)] = 1
+    return freq
+
+
+# In[7]:
+
+
+def get_p_value(array1,array2, corrcoeff):
+    cc = round(corrcoeff,2)
+    ci = int(cc*100 + 100)
+    distribution = bootstrap(array1,array2)
+    index_range = np.array(range(201))
+    corr_range = (index_range-100)/100
+    mean_index = np.sum(index_range*distribution)/np.sum(distribution)
+    mean_corr = (mean_index - 100)/100
+    if(corrcoeff>mean_corr):
+        p = np.sum(distribution[ci:])/np.sum(distribution)
+    else:
+        p = np.sum(distribution[:ci])/np.sum(distribution)
+    return p
+
+
+# In[8]:
+
+
+def generate_array(metric):
+    with open('OUTPUT.csv','r') as op:
+        csv_reader = csv.reader(op)
+        metric_values = {}
+        keys = []
+        i = 0
+        for row in csv_reader:
+            #if(i%1000 == 0):
+                #print('row '+str(i))
+            i+=1
+            if(not row):
+                continue
+            row_metric = row[1]+'_'+row[2]
+            subjID = row[0]
+            if(subjID not in keys):
+                keys.append(subjID)
+            if(row_metric == metric):
+                metric_values[subjID] = np.float64(row[3])
+        return metric_values, keys
+
+
+# In[9]:
+
+
+def generate_arrays(metric1,metric2):
+    dict1, keys1 = generate_array(metric1)
+    dict2, keys2 = generate_array(metric2)
+    # keys1 and keys2 are the same
+    arr1 = []
+    arr2 = []
+    for key in keys1:
+        a1 = 0
+        a2 = 0
+        try:
+            a1 = dict1[key]
+            a2 = dict2[key]
+        except:
+            continue
+        arr1.append(a1)
+        arr2.append(a2)
+        #print(key)
+    return arr1, arr2
+
+
+# In[10]:
+
+
+def extract_p(metric1,metric2):
+    array1,array2 = generate_arrays(metric1,metric2)
+    #print(array1,array2)
+    correlation = findCorrCoeff(array1,array2)
+    #print('corr: '+ str(correlation))
+    p = get_p_value(array1,array2,correlation)
+    #print(p)
+    return p, correlation
+
+
+# In[11]:
+
+
+def refined_correlation_matrix():
+    true_metrics = []
+    metrics = []
+    file_name = 'CMP_'+str(N)+'.csv'
+    with open('CORRELATION_MATRIX.csv','r') as cm:
+        csv_reader = csv.reader(cm)
+        for row in csv_reader:
+            metrics = row
+            break
+        true_metrics = metrics[1:]
+    with open(file_name,'w') as cmp:
+        csv_writer = csv.writer(cmp)
+        csv_writer.writerow(metrics)
+    #row1 = []
+    i = 0
+    for true_metric in true_metrics:
+        j = 0
+        row1 = []
+        row1.append(true_metric)
+        for true_metric_second in true_metrics:
+            try:
+                tup = extract_p(true_metric,true_metric_second)
+                row1.append(tup)
+            except:
+                row1.append('error')
+                print('error')
+            print(str(i)+' '+str(j)+' '+str(len(true_metrics)))
+            j = j + 1
+        with open(file_name,'a') as cmp:
+            csv_writer = csv.writer(cmp)
+            csv_writer.writerow(row1)
+        i = i + 1
+
+
+# In[12]:
+
+
+refined_correlation_matrix()
+
